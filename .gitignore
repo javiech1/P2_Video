@@ -1,5 +1,5 @@
-
 .venv/
+*.mov
+*.mp4
+*.webm
 
-input.mov
-output.mov
