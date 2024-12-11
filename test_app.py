@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 from app import build_ffmpeg_command, convert_video, encode_ladder, CODECS, RESOLUTIONS, BITRATES
+import subprocess
 
 class TestVideoConverter(unittest.TestCase):
     def setUp(self):
@@ -109,10 +110,13 @@ class TestVideoConverter(unittest.TestCase):
                 self.bitrate
             )
 
-    def test_output_path_format(self):
+    @patch('subprocess.run')
+    def test_output_path_format(self, mock_run):
         """Test output path formatting"""
+        mock_run.return_value = MagicMock(returncode=0)
+        
         for codec in CODECS:
-            _, result = convert_video(
+            success, result = convert_video(
                 self.input_path,
                 codec,
                 self.resolution,
