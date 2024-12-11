@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
-from app import build_ffmpeg_command, convert_video, encode_ladder, CODECS, RESOLUTIONS, BITRATES
 import subprocess
+from app import build_ffmpeg_command, convert_video, encode_ladder, CODECS, RESOLUTIONS, BITRATES
 
 class TestVideoConverter(unittest.TestCase):
     def setUp(self):
@@ -51,6 +51,23 @@ class TestVideoConverter(unittest.TestCase):
             for param in CODECS[codec]['params']:
                 self.assertIn(param, command)
 
+    def test_resolutions_and_bitrates_match(self):
+        """Test that resolutions and bitrates arrays have matching lengths"""
+        self.assertEqual(
+            len(RESOLUTIONS), 
+            len(BITRATES), 
+            "Resolutions and bitrates arrays must have the same length"
+        )
+
+    def test_codec_configurations(self):
+        """Test codec configuration validity"""
+        for codec, config in CODECS.items():
+            self.assertIn('ext', config, f"Codec {codec} missing 'ext' configuration")
+            self.assertIn('params', config, f"Codec {codec} missing 'params' configuration")
+            self.assertTrue(config['ext'].startswith('.'), f"Extension for {codec} should start with '.'")
+            self.assertIsInstance(config['params'], list, f"Params for {codec} should be a list")
+            self.assertTrue(len(config['params']) > 0, f"Params for {codec} should not be empty")
+
     @patch('subprocess.run')
     def test_convert_video_success(self, mock_run):
         """Test successful video conversion"""
@@ -87,6 +104,48 @@ class TestVideoConverter(unittest.TestCase):
         self.assertEqual(result, error_message)
         mock_run.assert_called_once()
 
+    def test_resolution_format(self):
+        """Test resolution format validation"""
+        invalid_resolutions = [
+            "1920x1080",  # wrong separator
+            "1920:",      # missing height
+            ":1080",      # missing width
+            "abcd:1080",  # invalid width
+            "1920:efgh",  # invalid height
+            "",          # empty string
+        ]
+        
+        for resolution in invalid_resolutions:
+            with self.subTest(resolution=resolution):
+                with self.assertRaises(Exception):
+                    build_ffmpeg_command(
+                        self.input_path,
+                        self.output_path,
+                        self.codec,
+                        resolution,
+                        self.bitrate
+                    )
+
+    def test_bitrate_format(self):
+        """Test bitrate format validation"""
+        invalid_bitrates = [
+            "1000",    # missing 'k'
+            "abc",     # invalid characters
+            "1000kb",  # wrong suffix
+            "",       # empty string
+        ]
+        
+        for bitrate in invalid_bitrates:
+            with self.subTest(bitrate=bitrate):
+                with self.assertRaises(Exception):
+                    build_ffmpeg_command(
+                        self.input_path,
+                        self.output_path,
+                        self.codec,
+                        self.resolution,
+                        bitrate
+                    )
+
     @patch('app.convert_video')
     def test_encode_ladder(self, mock_convert):
         """Test encoding ladder generation"""
@@ -98,6 +157,24 @@ class TestVideoConverter(unittest.TestCase):
         self.assertEqual(len(results), len(BITRATES))
         mock_convert.assert_called()
         self.assertEqual(mock_convert.call_count, len(RESOLUTIONS))
+
+    @patch('app.convert_video')
+    def test_encode_ladder_partial_failure(self, mock_convert):
+        """Test encoding ladder with some failed conversions"""
+        returns = [
+            (True, "success1.mp4"),
+            (False, "error1"),
+            (True, "success2.mp4"),
+            (False, "error2")
+        ]
+        mock_convert.side_effect = returns
+        
+        results = encode_ladder(self.input_path, self.codec)
+        
+        self.assertEqual(len(results), len(returns))
+        for (success, result), (exp_success, exp_result) in zip(results, returns):
+            self.assertEqual(success, exp_success)
+            self.assertEqual(result, exp_result)
 
     def test_invalid_codec(self):
         """Test handling of invalid codec"""
@@ -132,6 +209,43 @@ class TestVideoConverter(unittest.TestCase):
             self.assertIn(self.resolution.replace(':', 'x'), result)
             # Check bitrate inclusion
             self.assertIn(self.bitrate, result)
+
+    def test_path_handling(self):
+        """Test path handling with different formats"""
+        test_paths = [
+            "input.mp4",
+            "./input.mp4",
+            "../input.mp4",
+            "path/to/input.mp4",
+            Path("input.mp4"),
+            Path("path/to/input.mp4")
+        ]
+        
+        for path in test_paths:
+            with self.subTest(path=path):
+                command = build_ffmpeg_command(
+                    str(path),
+                    self.output_path,
+                    self.codec,
+                    self.resolution,
+                    self.bitrate
+                )
+                self.assertIn(str(path), command)
+
+    @patch('subprocess.run')
+    def test_empty_input_handling(self, mock_run):
+        """Test handling of empty or None inputs"""
+        invalid_inputs = [None, "", " "]
+        
+        for invalid_input in invalid_inputs:
+            with self.subTest(invalid_input=invalid_input):
+                with self.assertRaises(ValueError):
+                    convert_video(
+                        invalid_input,
+                        self.codec,
+                        self.resolution,
+                        self.bitrate
+                    )
 
 if __name__ == '__main__':
     unittest.main() 
